@@ -1,6 +1,6 @@
-#include "mex.h"
+#include "msfm2d.h"
 #include "math.h"
-#include "common.c"
+#include "common.h"
 
 /*
  * This function MSFM2D calculates the shortest distance from a list of
@@ -199,20 +199,18 @@ double CalculateDistance(double *T, double Fij, int *dims, int i, int j, bool us
     return Tt;
 }
 
-/* The matlab mex function  */
-void mexFunction( int nlhs, mxArray *plhs[],
-        int nrhs, const mxArray *prhs[] ) {
+/* The plain C function  */
+int msfm2d(
+    const double *F,
+    double *T,
+    double *Y,
+    const double *SourcePoints,
+    int n_src,
+    int nx, int ny,
+    bool usesecond,
+    bool usecross
+) {
     /* The input variables */
-    double *F, *SourcePoints;
-    bool *useseconda, *usecrossa;
-    bool usesecond=true;
-    bool usecross=true;
-    
-    /* The output distance image */
-    double *T;
-    
-    /* Euclidian distance image */
-    double *Y;
     
     /* Current distance values */
     double Tt, Ty;
@@ -224,12 +222,7 @@ void mexFunction( int nlhs, mxArray *plhs[],
     bool Ed;
     
     /* Size of input image */
-    const mwSize *dims_c;
-    mwSize dims[2];
-    
-    /* Size of  SourcePoints array */
-    const mwSize *dims_sp_c;
-    mwSize dims_sp[2];
+    int dims[2];
     
     /* Number of pixels in image */
     int npixels;
@@ -257,66 +250,12 @@ void mexFunction( int nlhs, mxArray *plhs[],
     /* Index */
     int IJ_index, XY_index, index;
     
-    /* Check for proper number of input and output arguments. */
-    if(nrhs<3) {
-        mexErrMsgTxt("2 to 4 inputs are required.");
-    }
-    if(nlhs==1) { Ed=0; }
-    else if (nlhs==2) { Ed=1; }
-    else {
-        mexErrMsgTxt("One or Two outputs required");
-    }
+    if(!F||!T||!SourcePoints||n_src<=0||nx<=0||ny<=0) { return -1; }
+    Ed=(Y!=NULL);
     
-    /* Check data input types  */
-    if(mxGetClassID(prhs[0])!=mxDOUBLE_CLASS) {
-        mexErrMsgTxt("Speed image must be of class double");
-    }
-    if(mxGetClassID(prhs[1])!=mxDOUBLE_CLASS) {
-        mexErrMsgTxt("SourcePoints must be of class double");
-    }
-    
-    if((nrhs>2)&&(mxGetClassID(prhs[2])!= mxLOGICAL_CLASS)) {
-        mexErrMsgTxt("UseSecond must be of class boolean / logical");
-    }
-    if((nrhs>3)&&(mxGetClassID(prhs[3])!= mxLOGICAL_CLASS)) {
-        mexErrMsgTxt("UseCross must be of class boolean / logical");
-    }
-        
     /* Get the sizes of the input image */
-    if(mxGetNumberOfDimensions(prhs[0])==2) {
-        dims_c = mxGetDimensions(prhs[0]);
-        dims[0]=dims_c[0]; dims[1]=dims_c[1];
-        npixels=dims[0]*dims[1];
-    }
-    else {
-        mexErrMsgTxt("Speed image must be 2d.");
-    }
-    
-    /* Get the sizes of the  SourcePoints */
-    dims_sp_c = mxGetDimensions(prhs[1]);
-    
-    if(dims_sp_c[0]!=2) {
-        mexErrMsgTxt("SourcePoints must be a 2xn matrix.");
-    }
-    dims_sp[0]=dims_sp_c [0]; dims_sp[1]=dims_sp_c[1];
-    
-    
-    /* Get pointers/data from  to each input. */
-    F=(double*)mxGetPr(prhs[0]);
-    SourcePoints=(double*)mxGetPr(prhs[1]);
-    if(nrhs>2){ useseconda = (bool*)mxGetPr(prhs[2]); usesecond=useseconda[0];}
-    if(nrhs>3){ usecrossa = (bool*)mxGetPr(prhs[3]); usecross=usecrossa[0];}
-    
-    /* Create the distance output array */
-    plhs[0] = mxCreateNumericArray(2, dims, mxDOUBLE_CLASS, mxREAL);
-    /* Assign pointer to output.  */
-    /*Distance image, also used to store the index of narrowband pixels  */
-    /*during marching process  */
-    T= mxGetPr(plhs[0]);
-    if(Ed) { 
-        plhs[1] = mxCreateNumericArray(2, dims, mxDOUBLE_CLASS, mxREAL);
-        Y= mxGetPr(plhs[1]);
-    }
+    dims[0]=nx; dims[1]=ny;
+    npixels=dims[0]*dims[1];
     
     /* Pixels which are processed and have a final distance are frozen */
     Frozen = (bool*)malloc( npixels* sizeof(bool) );
@@ -352,10 +291,10 @@ void mexFunction( int nlhs, mxArray *plhs[],
     
     /* set all starting points to distance zero and frozen  */
     /* and add all neighbours of the starting points to narrow list  */
-    for (z=0; z<dims_sp[1]; z++) {
+    for (z=0; z<n_src; z++) {
         /*starting point  */
-        x= (int)SourcePoints[0+z*2]-1;
-        y= (int)SourcePoints[1+z*2]-1;
+        x= (int)SourcePoints[0+z*2];
+        y= (int)SourcePoints[1+z*2];
         XY_index=x+y*dims[0];
         
         /*Set starting point to frozen and distance to zero  */
@@ -364,7 +303,7 @@ void mexFunction( int nlhs, mxArray *plhs[],
         if(Ed) { Y[XY_index]=0; }
     }
     
-    for (z=0; z<dims_sp[1]; z++) {
+    for (z=0; z<n_src; z++) {
         /*starting point  */
         x= (int)SourcePoints[0+z*2]-1;
         y= (int)SourcePoints[1+z*2]-1;
@@ -506,8 +445,6 @@ void mexFunction( int nlhs, mxArray *plhs[],
         free(neg_listo);
     }
     free(Frozen);
+
+    return 0;
 }
-
-
-
-
