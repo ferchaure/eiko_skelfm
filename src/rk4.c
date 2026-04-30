@@ -1,5 +1,8 @@
-#include "mex.h"
-#include "math.h"
+#include <stdbool.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+#include "rk4.h"
 
 /* RK4 is a function which performs one step of the Runge-Kutta 4 ray tracing
  *
@@ -16,25 +19,25 @@
  * Function is written by D.Kroon University of Twente (July 2008)
  */
 
-__inline int mindex2(int x, int y, int sizx)  { return y*sizx+x;}
-__inline int mindex3(int x, int y, int z, int sizx, int sizy)  { return z*sizy*sizx+y*sizx+x;}
+static inline int mindex2(int x, int y, int sizx)  { return y*sizx+x;}
+static inline int mindex3(int x, int y, int z, int sizx, int sizy)  { return z*sizy*sizx+y*sizx+x;}
 
 
-__inline int checkBounds2d( double *point, int *Isize) {
+static inline int checkBounds2d( double *point, int *Isize) {
     if((point[0]<0)||(point[1]<0)||(point[0]>(Isize[0]-1))||(point[1]>(Isize[1]-1))) { return false; }
     return true;
 }
 
-__inline int checkBounds3d( double *point, int *Isize) {
+static inline int checkBounds3d( double *point, int *Isize) {
     if((point[0]<0)||(point[1]<0)||(point[2]<0)||(point[0]>(Isize[0]-1))||(point[1]>(Isize[1]-1))||(point[2]>(Isize[2]-1))) { return false; }
     return true;
 }
 
-__inline double norm2(double *a) { return sqrt(a[0]*a[0]+a[1]*a[1]); }
-__inline double norm3(double *a) { return sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]); }
+static inline double norm2(double *a) { return sqrt(a[0]*a[0]+a[1]*a[1]); }
+static inline double norm3(double *a) { return sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]); }
 
 
-__inline void interpgrad2d(double *Ireturn, double *I, int *Isize, double *point) {
+static inline void interpgrad2d(double *Ireturn, double *I, int *Isize, double *point) {
     /*  Linear interpolation variables */
     int xBas0, xBas1, yBas0, yBas1;
     double perc[4]={0, 0, 0, 0};
@@ -73,7 +76,7 @@ __inline void interpgrad2d(double *Ireturn, double *I, int *Isize, double *point
     Ireturn[1]=I[index[0]+f]*perc[0]+I[index[1]+f]*perc[1]+I[index[2]+f]*perc[2]+I[index[3]+f]*perc[3];
 }
 
-__inline void interpgrad3d(double *Ireturn, double *I, int *Isize, double *point) {
+static inline void interpgrad3d(double *Ireturn, double *I, int *Isize, double *point) {
     /*  Linear interpolation variables */
     int xBas0, xBas1, yBas0, yBas1, zBas0, zBas1;
     double perc[8];
@@ -260,84 +263,16 @@ bool RK4STEP_3D(double *gradientArray, int *gradientArraySize, double *startPoin
     return true;
 }
 
-void mexFunction( int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[] ) {
-    double *gradientArray;
-    const mwSize *gradientArraySizeC;
-    const mwSize *PointSizeC;
-    mwSize gradientArraySize[3];
-    mwSize PointDims;
-    mwSize gradientDims;
-    int PointLength=1;
-    double *startPoint;
-    double startPoint1[3];
-    double *nextPoint;
-    double stepSize;
-    double *stepSizeArray;
-    int i;
-    
-    /* Check for proper number of input and output arguments. */
-    if(nrhs!=3) { mexErrMsgTxt("3 inputs are required."); }
-    if(nlhs!=1) { mexErrMsgTxt("One output required"); }
-    
-    /*  Get the number of gradient dimensions */
-    gradientDims=mxGetNumberOfDimensions(prhs[1]);
-    
-   /*Get the size of the gradient Array */
-    gradientArraySizeC = mxGetDimensions(prhs[1]);
-    
-    /*  Get the number of startingpoint dimensions */
-    PointDims=mxGetNumberOfDimensions(prhs[0]);
-    
-   /*Get the size of the startingpoint */
-    PointSizeC = mxGetDimensions(prhs[0]);
-    for (i=0; i<PointDims; i++) { PointLength=PointLength*PointSizeC[i]; }
-    
-   /*Check data input types  */
-    if(mxGetClassID(prhs[0])!=mxDOUBLE_CLASS) { mexErrMsgTxt("inputs must be of class double"); }
-    if(mxGetClassID(prhs[1])!=mxDOUBLE_CLASS) { mexErrMsgTxt("inputs must be of class double"); }
-    if(mxGetClassID(prhs[2])!=mxDOUBLE_CLASS) { mexErrMsgTxt("inputs must be of class double"); }
-    
-   /*Connect inputs */
-    startPoint =  mxGetPr(prhs[0]);
-    gradientArray = mxGetPr(prhs[1]);
-    stepSizeArray = mxGetPr(prhs[2]); stepSize=stepSizeArray[0];
-    
-   /*Create the output array */
-    plhs[0] = mxCreateNumericArray(2, PointSizeC, mxDOUBLE_CLASS, mxREAL);
-    nextPoint= mxGetPr(plhs[0]);
-    
-   /*Perform the RK4 raytracing step */
-    if(PointLength==2) {
-        gradientArraySize[0]=gradientArraySizeC[0];
-        gradientArraySize[1]=gradientArraySizeC[1];
-        startPoint1[0]=startPoint[0]-1.0; 
-        startPoint1[1]=startPoint[1]-1.0;
-        if(RK4STEP_2D(gradientArray, gradientArraySize, startPoint1, nextPoint, stepSize)) {
-            nextPoint[0]=nextPoint[0]+1.0; 
-            nextPoint[1]=nextPoint[1]+1.0;
-        }
-        else {
-            nextPoint[0]=0; nextPoint[1]=0;
-        }
-    }
-    else if(PointLength==3) {
-        gradientArraySize[0]=gradientArraySizeC[0];
-        gradientArraySize[1]=gradientArraySizeC[1];
-        gradientArraySize[2]=gradientArraySizeC[2];
-        startPoint1[0]=startPoint[0]-1.0; 
-        startPoint1[1]=startPoint[1]-1.0; 
-        startPoint1[2]=startPoint[2]-1.0;
-        if(RK4STEP_3D(gradientArray, gradientArraySize, startPoint1, nextPoint, stepSize)) {
-            nextPoint[0]=nextPoint[0]+1.0; 
-            nextPoint[1]=nextPoint[1]+1.0; 
-            nextPoint[2]=nextPoint[2]+1.0; 
-        }
-        else {
-            nextPoint[0]=0; nextPoint[1]=0; nextPoint[2]=0;
-        }
-        
-    }
-    else {
-        mexErrMsgTxt("Starting Point must be 2D or 3D");
-    }
+int rk4_step_2d(
+    const double *grad, int *grad_size,
+    const double *start, double *next, double step_size
+) {
+    return RK4STEP_2D((double*)grad, grad_size, (double*)start, next, step_size) ? 0 : -1;
+}
+
+int rk4_step_3d(
+    const double *grad, int *grad_size,
+    const double *start, double *next, double step_size
+) {
+    return RK4STEP_3D((double*)grad, grad_size, (double*)start, next, step_size) ? 0 : -1;
 }
