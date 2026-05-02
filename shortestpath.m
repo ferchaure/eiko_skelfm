@@ -1,15 +1,14 @@
-function ShortestLine=shortestpath(DistanceMap,StartPoint,SourcePoint,Stepsize,Method)
+function ShortestLine=shortestpath(DistanceMap,StartPoint,SourcePoint,Stepsize)
 % This function SHORTESTPATH traces the shortest path from start point to
 % source point using Runge Kutta 4 in a 2D or 3D distance map.
 %
-% ShortestLine=shortestpath(DistanceMap,StartPoint,SourcePoint,Stepsize,Method)
+% ShortestLine=shortestpath(DistanceMap,StartPoint,SourcePoint,Stepsize)
 % 
 % inputs,
 %   DistanceMap : A 2D or 3D distance map (from the functions msfm2d or msfm3d)
 %   StartPoint : Start point of the shortest path
 %   SourcePoint : (Optional), End point of the shortest path
 %   Stepsize: (Optional), Line trace step size 
-%   Method: (Optional), 'rk4' (default), 'euler' ,'simple'
 % output,
 %   ShortestLine: M x 2 or M x 3 array with the Shortest Path
 %
@@ -37,7 +36,6 @@ function ShortestLine=shortestpath(DistanceMap,StartPoint,SourcePoint,Stepsize,M
 % Process inputs
 if(~exist('Stepsize','var')), Stepsize=0.5; end
 if(~exist('SourcePoint','var')), SourcePoint=[]; end
-if(~exist('Method','var')), Method='rk4'; end
 
 % Calculate gradient of DistanceMap
 if(ndims(DistanceMap)==2) % Select 2D or 3D
@@ -58,17 +56,8 @@ ShortestLine=zeros(ifree,ndims(DistanceMap));
 
 % Iteratively trace the shortest line
 while(true)
-    % Calculate the next point using runge kutta
-    switch(lower(Method))
-        case 'rk4'
-            EndPoint=rk4(StartPoint, GradientVolume, Stepsize);
-        case 'euler'
-            EndPoint=e1(StartPoint, GradientVolume, Stepsize);
-        case 'simple'
-            EndPoint=s1(StartPoint,DistanceMap);
-        otherwise
-            error('shortestpath:input','unknown method');
-    end
+    EndPoint=rk4(StartPoint, GradientVolume, Stepsize);
+
 
     % Calculate the distance to the end point
     if(~isempty(SourcePoint))
