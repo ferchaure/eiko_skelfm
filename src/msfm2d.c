@@ -23,7 +23,7 @@
  *Function is written by D.Kroon University of Twente (June 2009)
  */
 
-double CalculateDistance(double *T, double Fij, int *dims, int i, int j, bool usesecond, bool usecross, bool *Frozen) {
+static double CalculateDistance(double *T, double Fij, int *dims, int i, int j, bool usesecond, bool usecross, bool *Frozen) {
     /* Derivatives */
     double Tm[4]={0, 0, 0, 0};
     double Tm2[4]={0, 0, 0, 0};

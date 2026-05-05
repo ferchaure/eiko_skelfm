@@ -26,7 +26,7 @@
 
 
 
-double second_derivative(double Txm1, double Txm2, double Txp1, double Txp2) {
+static double second_derivative(double Txm1, double Txm2, double Txp1, double Txp2) {
     bool ch1, ch2;
     double Tm;
     Tm=INF;
@@ -37,7 +37,7 @@ double second_derivative(double Txm1, double Txm2, double Txp1, double Txp2) {
     return Tm;
 }
 
-double CalculateDistance(double *T, double Fijk, int *dims, int i, int j, int k, bool usesecond, bool usecross, bool *Frozen) {
+static double CalculateDistance(double *T, double Fijk, int *dims, int i, int j, int k, bool usesecond, bool usecross, bool *Frozen) {
     
     /* Loop variables */
     int q, t;
