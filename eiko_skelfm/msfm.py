@@ -32,14 +32,14 @@ def msfm(speed, source_points, use_second=True, use_cross=True, return_y=False):
         if source_points.shape[0] != 3:
             raise ValueError("source_points must be 3xN for 3D speed")
         result = _msfm.msfm3d(speed, source_points,
-                               int(use_second), int(use_cross),
-                               int(return_y))
+                              use_second,use_cross,
+                              return_y)
     elif speed.ndim == 2:
         if source_points.shape[0] != 2:
             raise ValueError("source_points must be 2xN for 2D speed")
         result = _msfm.msfm2d(speed, source_points,
-                               int(use_second), int(use_cross),
-                               int(return_y))
+                               use_second,use_cross,
+                               return_y)
     else:
         raise ValueError("speed must be 2D or 3D")
 
