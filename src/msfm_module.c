@@ -34,17 +34,6 @@ static PyObject* py_msfm2d(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_ValueError, "source_points must be float64");
         return NULL;
     }
-    if (!PyArray_IS_F_CONTIGUOUS(arr_src)) {
-        PyArrayObject *tmp = (PyArrayObject*)PyArray_AsFortranArray((PyObject*)arr_src);
-        if (!tmp) return NULL;
-        arr_src = tmp;
-    }
-
-    if (!PyArray_IS_F_CONTIGUOUS(arr_F)) {
-        PyArrayObject *tmp = (PyArrayObject*)PyArray_AsFortranArray((PyObject*)arr_F);
-        if (!tmp) return NULL;
-        arr_F = tmp;
-    }
 
     dims[0] = PyArray_DIM(arr_F, 0);
     dims[1] = PyArray_DIM(arr_F, 1);
@@ -107,17 +96,6 @@ static PyObject* py_msfm3d(PyObject* self, PyObject* args) {
     if (PyArray_DTYPE(arr_src)->type_num != NPY_DOUBLE) {
         PyErr_SetString(PyExc_ValueError, "source_points must be float64");
         return NULL;
-    }
-    if (!PyArray_IS_F_CONTIGUOUS(arr_src)) {
-        PyArrayObject *tmp = (PyArrayObject*)PyArray_AsFortranArray((PyObject*)arr_src);
-        if (!tmp) return NULL;
-        arr_src = tmp;
-    }
-
-    if (!PyArray_IS_F_CONTIGUOUS(arr_F)) {
-        PyArrayObject *tmp = (PyArrayObject*)PyArray_AsFortranArray((PyObject*)arr_F);
-        if (!tmp) return NULL;
-        arr_F = tmp;
     }
 
     dims[0] = PyArray_DIM(arr_F, 0);
