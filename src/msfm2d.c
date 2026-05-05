@@ -305,8 +305,8 @@ int msfm2d(
     
     for (z=0; z<n_src; z++) {
         /*starting point  */
-        x= (int)SourcePoints[0+z*2]-1;
-        y= (int)SourcePoints[1+z*2]-1;
+        x= (int)SourcePoints[0+z*2];
+        y= (int)SourcePoints[1+z*2];
         XY_index=x+y*dims[0];
         
         /* Add neigbours of starting points  */
