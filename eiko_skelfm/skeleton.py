@@ -7,28 +7,13 @@ Computes accurate centerline skeletons of binary 2-D or 3-D images using
 fast-marching distance transforms.
 
 
-Quick-start example (2-D)
--------------------------
-    import numpy as np
-    from PIL import Image
-    from skeleton import skeleton
-
-    img = np.array(Image.open("vessels2d.png").convert("L")) / 255.0
-    Ibin = img < 0.5
-    S = skeleton(Ibin)
-
-    import matplotlib.pyplot as plt
-    plt.imshow(Ibin, cmap="gray")
-    for branch in S:
-        plt.plot(branch[:, 1], branch[:, 0], "-")
-    plt.show()
 """
 
 import numpy as np
 from scipy.ndimage import binary_dilation
 
-from msfm import msfm                    # fast-marching travel-time solver
-from shortestpath import shortestpath    # gradient-descent / RK-4 tracer
+from .msfm import msfm                    # fast-marching travel-time solver
+from .shortestpath import shortestpath    # gradient-descent / RK-4 tracer
 
 
 def skeleton(I: np.ndarray, verbose: bool = True) -> list:
@@ -57,7 +42,7 @@ def skeleton(I: np.ndarray, verbose: bool = True) -> list:
         print("Distance Map Constructed")
 
     # --- Starting point: voxel farthest from the boundary -------------------
-    source_point, max_d = _max_distance_point(boundary_distance, I, IS3D)
+    source_point, max_d = _max_distance_point(boundary_distance, I)
 
     # --- Speed image: bias the marcher toward the medial axis ---------------
     speed_image = (boundary_distance / max_d) ** 4
@@ -71,14 +56,13 @@ def skeleton(I: np.ndarray, verbose: bool = True) -> list:
             print(f"Find Branches Iterations : {itt}")
 
         # Fast-marching from all previously found branch points
-        T, Y = msfm(speed_image, source_point, False, False)
+        T, Y = msfm(speed_image, source_point, use_second=False, use_cross=False, return_y=True)
 
         # Farthest unvisited point becomes the new branch start
-        start_point, _ = _max_distance_point(Y, I, IS3D)
+        start_point, _ = _max_distance_point(Y, I)
 
         # Trace the geodesic back to the nearest source point
         shortest_line = shortestpath(T, start_point, source_point, 1)
-
         line_length = _get_line_length(shortest_line, IS3D)
 
         # Stop when the new branch is shorter than the largest vessel diameter
@@ -217,8 +201,7 @@ def _get_boundary_distance(I: np.ndarray, IS3D: bool) -> np.ndarray:
 
 def _max_distance_point(
     boundary_distance: np.ndarray,
-    I: np.ndarray,
-    IS3D: bool,
+    I: np.ndarray
 ) -> tuple:
     """
     Return the foreground voxel with the highest distance value.
@@ -227,7 +210,6 @@ def _max_distance_point(
     ----------
     boundary_distance : ndarray
     I : ndarray, bool
-    IS3D : bool
 
     Returns
     -------

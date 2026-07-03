@@ -94,7 +94,7 @@ def shortestpath(
         raise ValueError(f"start_point must have {ndim} elements.")
 
     source_point = (
-        np.asarray(source_point, dtype=float).ravel()
+        np.asarray(source_point, dtype=float).T  # (K, ndim), K>=1
         if source_point is not None
         else None
     )
@@ -153,25 +153,10 @@ def shortestpath(
 
     for _ in range(max_iter):
 
-        # Guard 1 — source proximity -----------------------------------------
-        if source_point is not None:
-            dist_to_source = np.linalg.norm(current - source_point)
-            if dist_to_source <= h:
-                # FIX: proportional micro-step instead of a hard teleport.
-                # This keeps the step direction physically consistent and
-                # avoids a visible "snap" when stepsize is large.
-                direction = source_point - current
-                dir_norm  = np.linalg.norm(direction)
-                if dir_norm > 1e-10:
-                    path.append(current + direction * (dist_to_source / dir_norm))
-                else:
-                    path.append(source_point.copy())
-                break
-
         # RK4 sub-steps -------------------------------------------------------
         k1 = velocity(current)
 
-        # Guard 3 (early, before computing k2-k4) — velocity collapse ---------
+        # Guard 3 — velocity collapse ---------
         if np.linalg.norm(k1) < 1e-6:
             break
 
@@ -181,11 +166,11 @@ def shortestpath(
 
         next_point = current + (h / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
-        # Guard 2 — explicit out-of-bounds check ------------------------------
+        # Guard 2 — out-of-bounds check (on the NEW point, like MATLAB) -------
         if not np.all((next_point >= bounds[:, 0]) & (next_point <= bounds[:, 1])):
             break
 
-        # Guard 4 — monotone descent (FIX: epsilon avoids plateau false-stop) -
+        # Guard 4 — monotone descent, evaluated on the NEW point --------------
         curr_dist = dist_interp(next_point[np.newaxis, :])[0]
         if curr_dist > prev_dist + 1e-12:
             break
@@ -194,4 +179,20 @@ def shortestpath(
         current = next_point
         path.append(current.copy())
 
+        # Guard 1 — source proximity
+        if source_point is not None:
+            deltas = source_point - current[np.newaxis, :]   # (K, ndim)
+            dists  = np.linalg.norm(deltas, axis=1)
+            idx    = np.argmin(dists)
+            dist_to_source = dists[idx]
+
+            if dist_to_source <= h:
+                nearest_source = source_point[idx]
+                direction = nearest_source - current
+                dir_norm  = np.linalg.norm(direction)
+                if dir_norm > 1e-10:
+                    path.append(current + direction * (dist_to_source / dir_norm))
+                else:
+                    path.append(nearest_source.copy())
+                break
     return np.array(path)

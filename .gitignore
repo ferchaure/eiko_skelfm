@@ -1,2 +1,6 @@
 build/
-eiko_skelfm/__pycache__/
+*/__pycache__/
+eiko_skelfm.egg-info/
+*.o
+.vscode/
+*/*.so

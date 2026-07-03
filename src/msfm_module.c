@@ -26,12 +26,20 @@ static PyObject* py_msfm2d(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_ValueError, "speed must be float64");
         return NULL;
     }
+    if (!PyArray_IS_F_CONTIGUOUS(arr_F)) {
+        PyErr_SetString(PyExc_ValueError, "speed must be Fortran-contiguous (use np.asfortranarray)");
+        return NULL;
+    }
     if (PyArray_NDIM(arr_src) != 2 || PyArray_DIM(arr_src, 0) != 2) {
         PyErr_SetString(PyExc_ValueError, "source_points must be 2xN");
         return NULL;
     }
     if (PyArray_DTYPE(arr_src)->type_num != NPY_DOUBLE) {
         PyErr_SetString(PyExc_ValueError, "source_points must be float64");
+        return NULL;
+    }
+    if (!PyArray_IS_F_CONTIGUOUS(arr_src)) {
+        PyErr_SetString(PyExc_ValueError, "source_points must be Fortran-contiguous (use np.asfortranarray)");
         return NULL;
     }
 
@@ -89,12 +97,20 @@ static PyObject* py_msfm3d(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_ValueError, "speed must be float64");
         return NULL;
     }
+    if (!PyArray_IS_F_CONTIGUOUS(arr_F)) {
+        PyErr_SetString(PyExc_ValueError, "speed must be Fortran-contiguous (use np.asfortranarray)");
+        return NULL;
+    }
     if (PyArray_NDIM(arr_src) != 2 || PyArray_DIM(arr_src, 0) != 3) {
         PyErr_SetString(PyExc_ValueError, "source_points must be 3xN");
         return NULL;
     }
     if (PyArray_DTYPE(arr_src)->type_num != NPY_DOUBLE) {
         PyErr_SetString(PyExc_ValueError, "source_points must be float64");
+        return NULL;
+    }
+    if (!PyArray_IS_F_CONTIGUOUS(arr_src)) {
+        PyErr_SetString(PyExc_ValueError, "source_points must be Fortran-contiguous (use np.asfortranarray)");
         return NULL;
     }
 

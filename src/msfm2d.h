@@ -1,5 +1,5 @@
 #pragma once
-#include "stdbool.h"
+#include <stdbool.h>
 
 int msfm2d(
     const double *F,        // speed image [nx × ny], column-major

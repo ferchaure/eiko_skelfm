@@ -1,5 +1,5 @@
 #pragma once
-#include "stdbool.h"
+#include <stdbool.h>
 
 int msfm3d(
     const double *F,        // speed volume [nx × ny × nz], column-major
