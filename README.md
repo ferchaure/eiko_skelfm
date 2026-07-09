@@ -1,9 +1,11 @@
 # eiko_skelfm
 
+[![PyPI version](https://img.shields.io/pypi/v/eiko-skelfm.svg)](https://pypi.org/project/eiko-skelfm/)
+
 Fast-marching skeleton extraction for 2D and 3D binary images.  
 Port of Kroon's MATLAB/MEX FastMarching toolbox to standalone C + Python/NumPy.
 
-![Skeleton extraction result](docs/figures/skeleton_2d_result.png)
+![Skeleton extraction result](https://raw.githubusercontent.com/ferchaure/eiko_skelfm/main/docs/figures/skeleton_2d_result.png)
 
 ## Installation
 
@@ -68,7 +70,7 @@ plt.savefig("skeleton_2d.png", dpi=150)
 plt.show()
 ```
 
-![Four-panel overview](docs/figures/skeleton_2d_overview.png)
+![Four-panel overview](https://raw.githubusercontent.com/ferchaure/eiko_skelfm/main/docs/figures/skeleton_2d_overview.png)
 
 See [`docs/example_skeleton_2d.py`](docs/example_skeleton_2d.py) for the full runnable script.
 
