@@ -7,14 +7,13 @@ name = "eiko-skelfm"
 version = "0.1.0"
 description = "Fast Marching Method - Python port of Kroon's toolbox"
 readme = "README.md"
-license = "BSD-2-Clause"
+license = {text = "BSD-2-Clause"}
 authors = [
     {name = "Fernando Julian Chaure"}
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -24,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 keywords = ["fast marching method", "skeleton"]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.19",
     "scipy>=1.5",
