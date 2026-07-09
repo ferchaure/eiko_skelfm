@@ -107,6 +107,6 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - uses: pypa/gh-action-pypi-publish@v1.12
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
