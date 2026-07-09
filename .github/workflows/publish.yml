@@ -1,0 +1,106 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 — manylinux + musllinux
+          - os: ubuntu-latest
+            cibw_archs: "x86_64"
+          # Linux aarch64 via QEMU
+          - os: ubuntu-latest
+            cibw_archs: "aarch64"
+          # macOS Intel
+          - os: macos-13
+            cibw_archs: "x86_64"
+          # macOS Apple Silicon (native)
+          - os: macos-latest
+            cibw_archs: "arm64"
+          # Windows x86_64
+          - os: windows-latest
+            cibw_archs: "AMD64"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Required to build Linux aarch64 wheels via QEMU emulation
+      - name: Set up QEMU (Linux aarch64 only)
+        if: matrix.cibw_archs == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.22
+        env:
+          # Build CPython 3.8-3.13 only; skip 32-bit variants
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_i686"
+          CIBW_ARCHS: ${{ matrix.cibw_archs }}
+
+          # Install numpy before building the C extension so that
+          # np.get_include() resolves correctly inside cibuildwheel's venv
+          CIBW_BEFORE_BUILD: "pip install numpy"
+
+          # On Windows (MSVC) -std=c99 is not a valid flag.
+          # Patch setup.py compile args via an env var checked in setup.py
+          # (see note below — setup.py already guards -lm on win32).
+          # The flag is defined in setup.py extra_compile_args; MSVC ignores
+          # unknown flags differently, but /TC makes MSVC treat sources as C.
+          CIBW_CONFIG_SETTINGS_WINDOWS: "setup-args=[]"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.cibw_archs }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build sdist
+        run: |
+          pip install build numpy
+          python -m build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    # Publish on version tags OR when manually triggered
+    if: >
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@v1.12
+        with:
+          packages-dir: dist/

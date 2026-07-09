@@ -7,7 +7,7 @@ name = "eiko-skelfm"
 version = "0.1.0"
 description = "Fast Marching Method - Python port of Kroon's toolbox"
 readme = "README.md"
-license = {text = "BSD 2-Clause"}
+license = "BSD-2-Clause"
 authors = [
     {name = "Fernando Julian Chaure"}
 ]
