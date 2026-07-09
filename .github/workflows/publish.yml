@@ -50,7 +50,7 @@ jobs:
 
           # Install numpy before building the C extension so that
           # np.get_include() resolves correctly inside cibuildwheel's venv
-          CIBW_BEFORE_BUILD: "pip install numpy"
+          CIBW_BEFORE_BUILD: "pip install --prefer-binary numpy"
 
           # Show full compiler output in CI logs
           CIBW_BUILD_VERBOSITY: 1
