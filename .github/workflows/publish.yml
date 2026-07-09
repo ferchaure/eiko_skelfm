@@ -43,14 +43,17 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.22
         env:
-          # Build CPython 3.8-3.13 only; skip 32-bit variants
-          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
+          # Build CPython 3.9-3.13 only (3.8 is EOL; NumPy 2.x dropped it)
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_i686"
           CIBW_ARCHS: ${{ matrix.cibw_archs }}
 
           # Install numpy before building the C extension so that
           # np.get_include() resolves correctly inside cibuildwheel's venv
           CIBW_BEFORE_BUILD: "pip install numpy"
+
+          # Show full compiler output in CI logs
+          CIBW_BUILD_VERBOSITY: 1
 
           # On Windows (MSVC) -std=c99 is not a valid flag.
           # Patch setup.py compile args via an env var checked in setup.py
