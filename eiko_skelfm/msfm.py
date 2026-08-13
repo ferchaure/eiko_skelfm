@@ -25,7 +25,7 @@ def msfm(speed, source_points, use_second=True, use_cross=True, return_y=False):
     Y : ndarray or None (Euclidean distance, Fortran order)
     """
     speed = np.asfortranarray(speed, dtype=np.float64)
-    speed = np.clip(speed, 1e-8, None)
+    speed = np.clip(speed, 1e-10, None)
     source_points = np.asfortranarray(source_points, dtype=np.float64)
 
     if speed.ndim == 3:

@@ -1,62 +1,358 @@
 """
-shortestpath.py
----------------
-Python port of the MATLAB shortestpath function by Dirk-Jan Kroon.
-
-Traces the shortest path from a start point to a source point in a 2D or 3D
-distance map using Runge-Kutta 4 (RK4) on the negative gradient field.
-
 Design decisions
 ----------------
-Normalisation (two-stage):
-    Gradients are normalised on the integer grid *before* building the
-    interpolators (stability in flat regions where raw values are tiny),
-    then re-normalised after each interpolation call (because bilinear/
-    trilinear interpolation of unit vectors does not preserve unit length).
+Gradient field (pointmin):
+    pointmin builds a **discrete descent-direction field**:
+    for every voxel it finds the first strictly-lower neighbour among the 8 (2D)
+    / 26 (3D) connected neighbours (padded with the image maximum at the border)
+    and stores the unit vector toward it.  Voxels with no lower neighbour get
+    zero.
 
-Termination (four independent guards, checked in order):
-    1. Source proximity  — Euclidean distance <= stepsize.
-    2. Out-of-bounds     — next point lies outside the map extents.
-    3. Velocity collapse — interpolated velocity norm < 1e-6 (stuck /
-                           left the map into the fill_value=0 region).
-    4. Monotone descent  — distance stops decreasing by more than a small
-                           epsilon (1e-12).  The epsilon avoids a spurious
-                           stop on quantisation plateaux in low-resolution
-                           or integer-valued maps.
 
-Final step:
-    When the source-proximity guard fires, the last appended point is a
-    proportional micro-step toward source_point rather than a hard teleport,
-    so the path length and direction are physically consistent at the end.
-
-Performance note:
-    Each RK4 iteration calls the interpolators 4 times (once per sub-step),
-    once per spatial dimension.  For a single path this is negligible.
-    For thousands of paths in a tight loop, consider vectorising the
-    interpolation calls or pre-building a raw gradient array and using
-    scipy.ndimage.map_coordinates, which has lower per-call overhead.
-
-RK4 vs simpler integrators:
-    RK4 is technically overkill for a smooth distance map.  Euler or RK2
-    would converge too, but RK4 produces noticeably smoother paths in
-    curved corridors and near saddle points, at a cost of 4x the
-    interpolation calls per step.
+Path composition:
+    The output array starts empty; the start point is NOT included.  Points are
+    appended after each successful RK4 step, and the nearest source is hard-
+    appended as the final point when the proximity guard fires.
 """
 
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
 
+
+# ---------------------------------------------------------------------------
+# pointmin — discrete descent-direction field (port of pointmin.m)
+# ---------------------------------------------------------------------------
+
+# 8-connected neighbour offsets for 2-D
+_NE2 = np.array([
+    [-1, -1], [-1, 0], [-1, 1],
+    [ 0, -1],          [ 0, 1],
+    [ 1, -1], [ 1, 0], [ 1, 1],
+], dtype=float)
+
+# 26-connected neighbour offsets for 3-D
+_NE3 = np.array([
+    [di, dj, dk]
+    for di in (-1, 0, 1)
+    for dj in (-1, 0, 1)
+    for dk in (-1, 0, 1)
+    if not (di == 0 and dj == 0 and dk == 0)
+], dtype=float)
+
+
+def _pointmin(I: np.ndarray):
+    """
+    Build the discrete descent-direction field from a 2-D or 3-D array I.
+
+    For every element, iterates over neighbours in connectivity order.  If a
+    neighbour is strictly smaller than the current minimum seen so far, the
+    direction toward that neighbour (unit vector) is recorded and the local
+    minimum is updated.  Elements on the border are padded with ``max(I)`` so
+    that boundary voxels never point outward.
+
+    Returns
+    -------
+    grads : list of ndarray, each shape == I.shape
+        One array per spatial axis.  For 2-D: [Fx, Fy].
+        For 3-D: [Fx, Fy, Fz].
+        The vectors are unit-length and point toward the strictly lower
+        neighbour (same convention as the rk4.c gradient array which is
+        already negated in shortestpath.m: GradientVolume = -Fx, -Fy).
+    """
+    ndim = I.ndim
+    I = np.asarray(I, dtype=float)
+
+    pad_val = float(I.max())
+    J = np.full(tuple(s + 2 for s in I.shape), pad_val)
+
+    if ndim == 2:
+        J[1:-1, 1:-1] = I
+        Ne = _NE2
+    else:
+        J[1:-1, 1:-1, 1:-1] = I
+        Ne = _NE3
+
+    # Working copy of I that tracks the current minimum seen for each voxel
+    I_min = I.copy()
+
+    # Output direction components, initialised to zero (no lower neighbour found)
+    components = [np.zeros(I.shape) for _ in range(ndim)]
+
+    for row in Ne:
+        # Slicing into the padded array with the neighbour offset
+        slices_J = tuple(
+            slice(1 + int(row[ax]), 1 + int(row[ax]) + I.shape[ax])
+            for ax in range(ndim)
+        )
+        In = J[slices_J]          # values at this neighbour for every voxel
+
+        # Unit direction toward this neighbour
+        norm = float(np.linalg.norm(row))
+        D = row / norm            # unit vector, length ndim
+
+        check = In < I_min        # strictly lower than best seen so far
+        I_min[check] = In[check]  # update running minimum
+
+        for ax in range(ndim):
+            components[ax][check] = D[ax]
+
+    return components   # [Fx, Fy] or [Fx, Fy, Fz]
+
+
+# ---------------------------------------------------------------------------
+# Bilinear / trilinear interpolation (port of interpgrad2d / interpgrad3d)
+# ---------------------------------------------------------------------------
+
+def _interp2d(gradient_array: np.ndarray, point: np.ndarray) -> np.ndarray:
+    """
+    Bilinear interpolation of a 2-component vector field at sub-pixel ``point``.
+
+    Parameters
+    ----------
+    gradient_array : ndarray, shape (nx, ny, 2)
+        Stacked gradient components along the last axis.
+    point : ndarray, shape (2,)
+        Coordinates (x, y) in 0-based index space.
+
+    Returns
+    -------
+    ndarray, shape (2,)
+    """
+    nx, ny = gradient_array.shape[:2]
+    x, y = point[0], point[1]
+
+    x0 = int(np.floor(x)); x1 = x0 + 1
+    y0 = int(np.floor(y)); y1 = y0 + 1
+
+    xc = x - x0; yc = y - y0
+    xci = 1.0 - xc; yci = 1.0 - yc
+
+    perc = np.array([xci * yci, xci * yc, xc * yci, xc * yc])
+
+    # Clamp to boundary (stick to boundary, like rk4.c)
+    x0 = max(0, min(x0, nx - 1)); x1 = max(0, min(x1, nx - 1))
+    y0 = max(0, min(y0, ny - 1)); y1 = max(0, min(y1, ny - 1))
+
+    # Interpolate both components simultaneously
+    vals = (
+        gradient_array[x0, y0] * perc[0]
+        + gradient_array[x0, y1] * perc[1]
+        + gradient_array[x1, y0] * perc[2]
+        + gradient_array[x1, y1] * perc[3]
+    )
+    return vals  # shape (2,)
+
+
+def _interp3d(gradient_array: np.ndarray, point: np.ndarray) -> np.ndarray:
+    """
+    Trilinear interpolation of a 3-component vector field at sub-voxel ``point``.
+
+    Parameters
+    ----------
+    gradient_array : ndarray, shape (nx, ny, nz, 3)
+    point : ndarray, shape (3,)
+
+    Returns
+    -------
+    ndarray, shape (3,)
+    """
+    nx, ny, nz = gradient_array.shape[:3]
+    x, y, z = point[0], point[1], point[2]
+
+    x0 = int(np.floor(x)); x1 = x0 + 1
+    y0 = int(np.floor(y)); y1 = y0 + 1
+    z0 = int(np.floor(z)); z1 = z0 + 1
+
+    xc = x - x0; yc = y - y0; zc = z - z0
+    xci = 1.0 - xc; yci = 1.0 - yc; zci = 1.0 - zc
+
+    p = np.array([
+        xci * yci * zci, xci * yci * zc,
+        xci * yc  * zci, xci * yc  * zc,
+        xc  * yci * zci, xc  * yci * zc,
+        xc  * yc  * zci, xc  * yc  * zc,
+    ])
+
+    # Clamp to boundary
+    x0 = max(0, min(x0, nx - 1)); x1 = max(0, min(x1, nx - 1))
+    y0 = max(0, min(y0, ny - 1)); y1 = max(0, min(y1, ny - 1))
+    z0 = max(0, min(z0, nz - 1)); z1 = max(0, min(z1, nz - 1))
+
+    vals = (
+        gradient_array[x0, y0, z0] * p[0]
+        + gradient_array[x0, y0, z1] * p[1]
+        + gradient_array[x0, y1, z0] * p[2]
+        + gradient_array[x0, y1, z1] * p[3]
+        + gradient_array[x1, y0, z0] * p[4]
+        + gradient_array[x1, y0, z1] * p[5]
+        + gradient_array[x1, y1, z0] * p[6]
+        + gradient_array[x1, y1, z1] * p[7]
+    )
+    return vals  # shape (3,)
+
+
+# ---------------------------------------------------------------------------
+# Bounds check helpers
+# ---------------------------------------------------------------------------
+
+def _in_bounds_2d(point: np.ndarray, size: tuple) -> bool:
+    return (
+        0 <= point[0] <= size[0] - 1
+        and 0 <= point[1] <= size[1] - 1
+    )
+
+
+def _in_bounds_3d(point: np.ndarray, size: tuple) -> bool:
+    return (
+        0 <= point[0] <= size[0] - 1
+        and 0 <= point[1] <= size[1] - 1
+        and 0 <= point[2] <= size[2] - 1
+    )
+
+
+# ---------------------------------------------------------------------------
+# RK4 step (port of RK4STEP_2D / RK4STEP_3D from rk4.c)
+# ---------------------------------------------------------------------------
+
+def _rk4_step_2d(
+    grad_array: np.ndarray,
+    start: np.ndarray,
+    step_size: float,
+) -> np.ndarray | None:
+    """
+    One RK4 step in 2-D.  Returns the new point, or None if any intermediate
+    point goes out of bounds (matching rk4.c returning ``[0, 0]``).
+
+    Parameters
+    ----------
+    grad_array : ndarray, shape (nx, ny, 2)
+        Stacked negated unit-direction field (descent directions).
+    start : ndarray, shape (2,)
+    step_size : float
+
+    Returns
+    -------
+    next_point : ndarray, shape (2,) or None
+    """
+    size = grad_array.shape[:2]
+
+    def _kstep(pt):
+        v = _interp2d(grad_array, pt)
+        n = np.sqrt(v[0] ** 2 + v[1] ** 2)
+        if n == 0.0:
+            # Zero gradient (flat region / no lower neighbour in pointmin).
+            # rk4.c would produce NaN here, which fails bounds check → abort.
+            return None
+        return v * (step_size / n)
+
+    k1 = _kstep(start)
+    if k1 is None:
+        return None
+    tp = start - k1 * 0.5
+    if not _in_bounds_2d(tp, size):
+        return None
+
+    k2 = _kstep(tp)
+    if k2 is None:
+        return None
+    tp = start - k2 * 0.5
+    if not _in_bounds_2d(tp, size):
+        return None
+
+    k3 = _kstep(tp)
+    if k3 is None:
+        return None
+    tp = start - k3
+    if not _in_bounds_2d(tp, size):
+        return None
+
+    k4 = _kstep(tp)
+    if k4 is None:
+        return None
+
+    nxt = start - (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+    if not _in_bounds_2d(nxt, size):
+        return None
+
+    return nxt
+
+
+def _rk4_step_3d(
+    grad_array: np.ndarray,
+    start: np.ndarray,
+    step_size: float,
+) -> np.ndarray | None:
+    """
+    One RK4 step in 3-D.  Returns the new point, or None if out of bounds.
+
+    Parameters
+    ----------
+    grad_array : ndarray, shape (nx, ny, nz, 3)
+    start : ndarray, shape (3,)
+    step_size : float
+
+    Returns
+    -------
+    next_point : ndarray, shape (3,) or None
+    """
+    size = grad_array.shape[:3]
+
+    def _kstep(pt):
+        v = _interp3d(grad_array, pt)
+        n = np.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
+        if n == 0.0:
+            return None
+        return v * (step_size / n)
+
+    k1 = _kstep(start)
+    if k1 is None:
+        return None
+    tp = start - k1 * 0.5
+    if not _in_bounds_3d(tp, size):
+        return None
+
+    k2 = _kstep(tp)
+    if k2 is None:
+        return None
+    tp = start - k2 * 0.5
+    if not _in_bounds_3d(tp, size):
+        return None
+
+    k3 = _kstep(tp)
+    if k3 is None:
+        return None
+    tp = start - k3
+    if not _in_bounds_3d(tp, size):
+        return None
+
+    k4 = _kstep(tp)
+    if k4 is None:
+        return None
+
+    nxt = start - (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+    if not _in_bounds_3d(nxt, size):
+        return None
+
+    return nxt
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def shortestpath(
     distance_map,
     start_point,
     source_point=None,
     stepsize: float = 0.5,
-    max_iter: int = 10_000,
 ) -> np.ndarray:
     """
     Trace the shortest path in a 2-D or 3-D distance map using RK4 integration
-    on the normalised negative gradient field.
+    on the discrete descent-direction field (pointmin).
+
+    Faithful port of:
+      ``FastMarching_version3b/shortestpath.m`` (outer loop & termination)
+      ``FastMarching_version3b/shortestpath/rk4.c`` (RK4 step)
+      ``FastMarching_version3b/functions/pointmin.m`` (gradient field)
 
     Parameters
     ----------
@@ -65,21 +361,21 @@ def shortestpath(
         Axis order: (row, col) for 2-D, (row, col, depth) for 3-D.
     start_point : array-like, length ndim
         Starting position in index coordinates, e.g. [row, col].
-    source_point : array-like, length ndim, optional
-        End position.  Integration stops when the path arrives within
-        `stepsize` of this point.  If None, the monotone-descent guard
-        acts as the termination criterion.
+    source_point : array-like or None, optional
+        End position(s).  Shape (ndim,) for a single source, or (ndim, K)
+        for K source points.  Integration stops when the path arrives within
+        ``stepsize`` of the nearest source.  If None, only the stall guard
+        fires.
     stepsize : float, optional
         RK4 step size in pixels.  Default 0.5.
-        Large values (e.g. 2.0) speed up tracing but produce a coarser
-        path and a more visible "snap" at the very end.
-    max_iter : int, optional
-        Hard iteration cap. Default 10 000.
 
     Returns
     -------
     path : np.ndarray, shape (M, ndim)
-        Ordered positions from start_point to source_point (inclusive).
+        Ordered positions from just after start_point to source_point.
+        The start point is **not** included (matching shortestpath.m).
+        The nearest source is hard-appended as the last point when the
+        proximity guard fires (matching shortestpath.m line 100).
     """
     # ------------------------------------------------------------------
     # 0. Validate & coerce inputs
@@ -93,106 +389,77 @@ def shortestpath(
     if start_point.size != ndim:
         raise ValueError(f"start_point must have {ndim} elements.")
 
-    source_point = (
-        np.asarray(source_point, dtype=float).T  # (K, ndim), K>=1
-        if source_point is not None
-        else None
-    )
-
-    shape  = distance_map.shape
-    axes   = tuple(np.arange(s) for s in shape)
-    bounds = np.array([[0.0, s - 1.0] for s in shape])   # (ndim, 2)
-
-    # ------------------------------------------------------------------
-    # 1. Precompute normalised gradient field on the integer grid
-    # ------------------------------------------------------------------
-    grads    = np.gradient(distance_map)
-    if isinstance(grads, np.ndarray):        # guard: ndim==1 edge case
-        grads = [grads]
-
-    grad_mag = np.sqrt(sum(g ** 2 for g in grads))
-    grad_mag[grad_mag < 1e-10] = 1.0        # avoid division by zero in flat zones
-
-    norm_grads = [-g / grad_mag for g in grads]   # point toward decreasing distance
+    # source_point: normalise to (K, ndim)
+    if source_point is not None:
+        sp = np.asarray(source_point, dtype=float)
+        if sp.ndim == 1:
+            sp = sp.reshape(1, -1)       # (1, ndim)
+        elif sp.shape[0] == ndim and sp.ndim == 2:
+            sp = sp.T                    # (dim, K) → (K, dim)
+        # else already (K, ndim)
+        source_point = sp
 
     # ------------------------------------------------------------------
-    # 2. Build interpolators
-    #    fill_value=0.0  →  velocity collapses to zero outside the map,
-    #    which is caught by the norm < 1e-6 guard (termination guard 3).
+    # 1. Build discrete descent-direction field (pointmin)
     # ------------------------------------------------------------------
-    vel_interps = [
-        RegularGridInterpolator(axes, ng, method="linear",
-                                bounds_error=False, fill_value=0.0)
-        for ng in norm_grads
-    ]
+    components = _pointmin(distance_map)   # list of ndim arrays, each shape == dm.shape
 
-    dist_interp = RegularGridInterpolator(
-        axes, distance_map, method="linear",
-        bounds_error=False, fill_value=np.inf
-    )
+    # Negate so that the gradient array contains *descent* directions,
+    # matching shortestpath.m:  GradientVolume(:,:,1) = -Fx
+    # (pointmin returns Fx pointing toward the lower neighbour, so
+    #  negating gives the direction the marcher should move)
+    neg_comps = [-c for c in components]
 
-    # ------------------------------------------------------------------
-    # 3. Velocity helper
-    #    Re-normalise after interpolation: bilinear/trilinear interpolation
-    #    of unit vectors does NOT preserve unit length; the re-normalisation
-    #    keeps the trace speed constant throughout integration.
-    # ------------------------------------------------------------------
-    def velocity(p: np.ndarray) -> np.ndarray:
-        q   = p[np.newaxis, :]                        # shape (1, ndim)
-        v   = np.array([f(q)[0] for f in vel_interps])
-        mag = np.linalg.norm(v)
-        return v / mag if mag > 1e-6 else np.zeros(ndim)
+    # Stack into a single array for efficient indexing
+    # Shape: (nx, ny, 2) for 2-D or (nx, ny, nz, 3) for 3-D
+    grad_array = np.stack(neg_comps, axis=-1)
 
     # ------------------------------------------------------------------
-    # 4. RK4 integration
+    # 2. Choose the appropriate RK4 step function
     # ------------------------------------------------------------------
-    path    = [start_point.copy()]
+    rk4_step = _rk4_step_2d if ndim == 2 else _rk4_step_3d
+
+    # ------------------------------------------------------------------
+    # 3. Integration loop (matching shortestpath.m)
+    # ------------------------------------------------------------------
+    path: list = []          # start point NOT included, matching MATLAB
     current = start_point.copy()
-    h       = stepsize
-    prev_dist = dist_interp(current[np.newaxis, :])[0]
+    i = 0                    # iteration counter (1-based in MATLAB, but used for Movement)
 
-    for _ in range(max_iter):
+    # History ring for stall detection (movement check vs. 10 iters back)
+    history: list = []
 
-        # RK4 sub-steps -------------------------------------------------------
-        k1 = velocity(current)
+    while True:
+        end_point = rk4_step(grad_array, current, stepsize)
 
-        # Guard 3 — velocity collapse ---------
-        if np.linalg.norm(k1) < 1e-6:
+        # Guard 1 — out of bounds (EndPoint(1)==0 in MATLAB)
+        if end_point is None:
             break
 
-        k2 = velocity(current + 0.5 * h * k1)
-        k3 = velocity(current + 0.5 * h * k2)
-        k4 = velocity(current +        h * k3)
-
-        next_point = current + (h / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
-
-        # Guard 2 — out-of-bounds check (on the NEW point, like MATLAB) -------
-        if not np.all((next_point >= bounds[:, 0]) & (next_point <= bounds[:, 1])):
-            break
-
-        # Guard 4 — monotone descent, evaluated on the NEW point --------------
-        curr_dist = dist_interp(next_point[np.newaxis, :])[0]
-        if curr_dist > prev_dist + 1e-12:
-            break
-        prev_dist = curr_dist
-
-        current = next_point
-        path.append(current.copy())
-
-        # Guard 1 — source proximity
-        if source_point is not None:
-            deltas = source_point - current[np.newaxis, :]   # (K, ndim)
-            dists  = np.linalg.norm(deltas, axis=1)
-            idx    = np.argmin(dists)
-            dist_to_source = dists[idx]
-
-            if dist_to_source <= h:
-                nearest_source = source_point[idx]
-                direction = nearest_source - current
-                dir_norm  = np.linalg.norm(direction)
-                if dir_norm > 1e-10:
-                    path.append(current + direction * (dist_to_source / dir_norm))
-                else:
-                    path.append(nearest_source.copy())
+        # Guard 2 — stalled path: movement vs. point 10 iterations back
+        if i > 10:
+            movement = float(np.linalg.norm(end_point - history[0]))
+            if movement < stepsize:
                 break
-    return np.array(path)
+        # keep a sliding window of 11 points
+        history.append(end_point.copy())
+        if len(history) > 11:
+            history.pop(0)
+
+        i += 1
+        path.append(end_point.copy())
+
+        # Guard 3 — source proximity
+        if source_point is not None:
+            dists = np.linalg.norm(source_point - end_point[np.newaxis, :], axis=1)
+            idx = int(np.argmin(dists))
+            dist_to_end = dists[idx]
+
+            if dist_to_end < stepsize:
+                # Hard-append the nearest source (matching shortestpath.m:100)
+                path.append(source_point[idx].copy())
+                break
+
+        current = end_point
+
+    return np.array(path) if path else np.empty((0, ndim))

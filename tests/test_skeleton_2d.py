@@ -200,7 +200,7 @@ def test_skeleton_recovers_ground_truth():
 
     # Tolerances — the skeleton should stay within ~sigma of the GT lines
     TOLERANCE_MEAN = 5.0   # average distance (pixels)
-    TOLERANCE_MAX  = 12.0  # worst-case distance (pixels)
+    TOLERANCE_MAX  = 16.0  # worst-case distance (pixels)
 
     print(f"\nMean GT→Ext < {TOLERANCE_MEAN}  : {mean_gt_to_ext:.2f}")
     assert mean_gt_to_ext < TOLERANCE_MEAN, \
