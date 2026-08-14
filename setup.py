@@ -18,6 +18,7 @@ ext = Extension(
         'src/common.c',
         'src/msfm2d.c',
         'src/msfm3d.c',
+        'src/rk4.c',
     ],
     include_dirs=[np.get_include(), 'src/'],
     extra_compile_args=compile_args,

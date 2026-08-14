@@ -3,7 +3,7 @@ project(eiko_skelfm C)
 set(CMAKE_C_STANDARD 99)
 
 add_library(eiko_skelfm STATIC
-    src/common.c src/msfm2d.c src/msfm3d.c
+    src/common.c src/msfm2d.c src/msfm3d.c src/rk4.c
 )
 target_include_directories(eiko_skelfm PUBLIC src/)
 if(UNIX)
