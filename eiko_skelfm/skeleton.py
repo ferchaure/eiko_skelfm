@@ -155,17 +155,18 @@ def _organize_skeleton(skeleton_segments: list, IS3D: bool) -> list:
         if close.any():
             for ep_idx in np.where(close)[0]:
                 k = int(D[ep_idx].argmin())
-                # Only cut in the interior (not near the segment's own tips)
-                if 2 < k < (m - 2):
+                if 1 < k < (m - 3):
                     cut_skel[w, k] = True
 
     # Split each segment at its cut-points and collect the sub-segments
     S: list = []
     for w, ss in enumerate(skeleton_segments):
         cut_indices = np.where(cut_skel[w, : len(ss)])[0].tolist()
-        boundaries = [0] + cut_indices + [len(ss)]
+        boundaries = [0] + cut_indices + [len(ss) - 1]
         for i in range(len(boundaries) - 1):
-            S.append(ss[boundaries[i]: boundaries[i + 1]])
+            # To duplicate the junction point (matching Matlab's `ss(r(i):r(i+1),:)`),
+            # we slice up to boundaries[i + 1] + 1
+            S.append(ss[boundaries[i] : boundaries[i + 1] + 1])
 
     return S
 
